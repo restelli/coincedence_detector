@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from IPython.display import display, clear_output
 from matplotlib.widgets import Button,CheckButtons,TextBox
+import serial
 
 
 class Controls:
@@ -16,12 +17,14 @@ class Controls:
     track of asynchronous events such as key presses etc...
 
     """
-    def __init__(self,hardware_name=None,filename=None, append = True):
+    def __init__(self,hardware_name='COM5',filename=None, append = True):
         self.filename=filename
         if not (self.filename==None):
             self.file = open(filename,"a" if append else 'w')
         self.keep_running = True
         self.t = 0
+        self.ser = serial.Serial(hardware_name,baudrate=115200)  # open serial port
+        print(self.ser.name)  
         print("FPGA hardware initialized")
 
     def write_file(self,data):
@@ -35,29 +38,21 @@ class Controls:
             Controls.keep_running is set to False. This can be done with the stop_pressed(handle) method
             that can be called, for example by a button widget.
         """
-        # Code to start the hardware
-        print("The FPGA is starting the acquisition")
+        self.ser.write(b's')
+        print("The FPGA is started the acquisition")
         while self.keep_running and (samples != 0):
             if samples > 0:
                 samples-=1
             #Code that collects data drom the hardware
-            #It can also 
-            self.t+=1
-            t = self.t
-            data = [np.sin(t/2),
-                   np.sin(t/3),
-                   np.sin(t/4),
-                   np.sin(t/5),
-                   np.sin(t/6),
-                   np.sin(t/7),
-                   np.sin(t/8)]
+            data = [float(np.frombuffer(self.ser.read(4)[::-1],dtype=np.uint32)) for _ in range(7) ]
             if not (self.filename == None):
                 self.write_file(data)
             yield data
         if not (self.filename==None):
             self.file.close()
             
-        print("The FPGA is stopping the acquisition")
+        self.ser.write(b'x')
+        print("The FPGA is stopped the acquisition")
 
 
 class DataChart:
@@ -105,7 +100,7 @@ class DataChart:
         self.sum+=data
 
 
-def run_gui():
+def run_gui(initial_tau=[3.85e-9,2.65e-9,3.6e-9]):
     #This line initializes the hardware and selects the output file.
     controls = Controls(filename="./output.txt",append = True)
 
@@ -143,7 +138,7 @@ def run_gui():
     #These are the check marks to enable or not the accidental correction and the vector
     # containing the estimation of the coincidence window
     checks = CheckButtons(fig.add_subplot(  grid[2, 2]  ), ["AB","AB'","BB'"])
-    text_box = TextBox(fig.add_subplot(     grid[3, 2]  ), "[AB, AB, BB'] = ", initial = [0,0,0])
+    text_box = TextBox(fig.add_subplot(     grid[3, 2]  ), "[AB, AB, BB'] = ", initial = initial_tau)
 
 
     # Now that we have defined all graphical elements we can display the panel
@@ -156,25 +151,34 @@ def run_gui():
         #This section applies the correction for accidental counts
         # The correction will not be saved on the raw output file but
         # it will affect the "total counts" visualized on the graphical panel 
-        for n, correction in enumerate(checks.get_status()):
-            if correction:
-                try:
-                    # n+3 gives the index 3,4,5 that are correspondent to AB, AB_prime, BB_prime.
-                    data[n+3] = 1/(data[n+3]) + eval(text_box.text)[n]
-                except:
-                    #This prevents partially written data to be evaluated incorrectly
-                    pass
-
+        AB_correct, AB_prime_correct, BB_prime_correct = checks.get_status()
+        try:
+            # n+3 gives the index 3,4,5 that are correspondent to AB, AB_prime, BB_prime.
+            tau = eval(text_box.text)
+            if len(tau)!=3:
+                tau = initial_tau
+        except:
+            #This prevents partially written data to be evaluated incorrectly
+            pass
+        
+        if AB_correct:
+            data[3] = data[3] - data[0] * data[1] * 2 * tau [0]
+        
+        if AB_prime_correct:
+            data[4] = data[4] - data[0] * data[2] * 2 * tau [1]
+        
+        if BB_prime_correct:
+            data[5] = data[5] - data[1] * data[2] * 2 * tau [2]
 
         #This section updates the plots and text elements
         text.cla() #the text needs to be cleared before being updated
         for n, plot in enumerate([A, B, B_prime, AB, AB_prime, BB_prime, ABB_prime]):
                             #Note: this ^ list reflects the exact order of data in the binary frame                                                                         
             plot.update(data[n])
-            text.text(0.05,1/7*((6-n)+0.5), "{:<4} {:.3f} {:.3f}".format(plot.title,plot.data,plot.sum),size=14)
+            text.text(0.05,1/7*((6-n)+0.5), "{:<4} {:.0f} {:.0f}".format(plot.title,plot.data,plot.sum),size=14)
         fig.canvas.flush_events()
         plt.pause(0.01) #Without this line the graphical system does not have time to draw.
-    
+    controls.ser.close()
 if __name__=="__main__":
     run_gui()
     
