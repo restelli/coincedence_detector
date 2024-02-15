@@ -101,17 +101,25 @@ class DataChart:
 
 
 def run_gui(initial_tau=[3.85e-9,2.65e-9,3.6e-9]):
+
+    #This part of the program automatically finds the COM port
+    # It simply selects the last port found.
+    # This behavior should always work since typically the COM port used by the FPGA
+    #  is the last of the list, however a more soffisticated search could be implemented
+    #  if this does not work.
+    
+    import serial.tools.list_ports
+    com_port = serial.tools.list_ports.comports()[-1].device
+    
     #This line initializes the hardware and selects the output file.
-    controls = Controls(filename="./output.txt",append = True)
-
-
+    controls = Controls(hardware_name = com_port, filename = "./output.txt", append = True)
+    
     #This sets up the figure as both visualization and control panel.
     # GridSpec is an advanced framing system that allows to place plots
     # and widgets in a "quantized" grid by specifying ranges
 
     fig = plt.figure(figsize=(8, 6))
     grid = plt.GridSpec(4, 4, hspace=0.5, wspace=0.5)
-
 
     # Placement of all the plots in a grid
 
