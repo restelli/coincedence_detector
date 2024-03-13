@@ -8,6 +8,7 @@ from matplotlib.widgets import Button,CheckButtons,TextBox
 import serial
 import serial.tools.list_ports
 import json
+from time import sleep
 
 
 class Controls:
@@ -46,6 +47,14 @@ class Controls:
         
         
         self.ser = serial.Serial(hardware_name,baudrate=115200)  # open serial port
+        self.ser.write(b'e')
+        sleep(0.2)
+        self.ser.close()
+        sleep(0.2)
+        self.ser = serial.Serial(hardware_name,baudrate=115200)  # open serial port again
+        
+        
+        
         print(self.ser.name)  
         print("FPGA hardware initialized")
         
@@ -68,6 +77,7 @@ class Controls:
         """
         self.ser.write(b'e')
         self.ser.flush()
+        self.ser.reset_input_buffer()
         self.ser.write(b's')
         print("The FPGA started the acquisition")
         while self.keep_running and (samples != 0):
