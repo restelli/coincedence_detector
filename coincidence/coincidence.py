@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 from IPython.display import display, clear_output
 from matplotlib.widgets import Button,CheckButtons,TextBox
 import serial
+import serial.tools.list_ports
+import json
 
 
 class Controls:
@@ -17,18 +19,44 @@ class Controls:
     track of asynchronous events such as key presses etc...
 
     """
-    def __init__(self,hardware_name='COM5',filename=None, append = True):
+    def __init__(self,hardware_name=None,filename=None, append = True):
         self.filename=filename
         if not (self.filename==None):
             self.file = open(filename,"a" if append else 'w')
         self.keep_running = True
         self.t = 0
+        
+        
+        if hardware_name==None:
+            port_list = serial.tools.list_ports.comports()
+            print("This is the list of ports I found:")
+            
+            port_names = [n.device for n in port_list]
+            
+            port_names.sort()
+            
+            for name in port_names:
+                print(" " * 34 + f"{name}")
+            
+            
+            hardware_name = port_names[-1]
+            if hardware_name == 'COM1':
+                print("Only default port available. Try detaching and re-attaching USB")
+                exit()
+        
+        
         self.ser = serial.Serial(hardware_name,baudrate=115200)  # open serial port
         print(self.ser.name)  
         print("FPGA hardware initialized")
+        
+        
+    def __del__(self):
+        self.ser.write(b'e')
+        self.ser.close()
 
     def write_file(self,data):
-            self.file.writelines([f"{data}\n"])
+            self.file.writelines([f"{data}"[1:-1]+'\n']) #Removes 1st and last character to
+                                                      # convert a list to CSV
 
     def stop_pressed(self,handle):
         self.keep_running = False
@@ -38,8 +66,10 @@ class Controls:
             Controls.keep_running is set to False. This can be done with the stop_pressed(handle) method
             that can be called, for example by a button widget.
         """
+        self.ser.write(b'e')
+        self.ser.flush()
         self.ser.write(b's')
-        print("The FPGA is started the acquisition")
+        print("The FPGA started the acquisition")
         while self.keep_running and (samples != 0):
             if samples > 0:
                 samples-=1
@@ -51,8 +81,9 @@ class Controls:
         if not (self.filename==None):
             self.file.close()
             
-        self.ser.write(b'x')
-        print("The FPGA is stopped the acquisition")
+        self.ser.write(b'e')
+        self.ser.flush()
+        print("The FPGA stopped the acquisition")
 
 
 class DataChart:
@@ -100,7 +131,7 @@ class DataChart:
         self.sum+=data
 
 
-def run_gui(initial_tau=[3.85e-9,2.65e-9,3.6e-9]):
+def run_gui(config_filename = 'config.json'):
 
     #This part of the program automatically finds the COM port
     # It simply selects the last port found.
@@ -108,11 +139,31 @@ def run_gui(initial_tau=[3.85e-9,2.65e-9,3.6e-9]):
     #  is the last of the list, however a more soffisticated search could be implemented
     #  if this does not work.
     
-    import serial.tools.list_ports
-    com_port = serial.tools.list_ports.comports()[-1].device
     
+ 
+        # Reading from json file
+    try:
+        with open(config_filename, 'r') as f:
+            json_object = json.load(f)
+    except Exception as error:
+        print(error)
+        print('The configuration file is empty: Filling it with 0')
+        corrections = {"AB":0.0,
+            "AB'":0.0,
+            "BB'":0.0}
+        with open(config_filename, 'w+') as f:
+            json.dump(corrections,f)
+    
+    with open(config_filename, 'r') as f:
+        json_object = json.load(f)
+        
+    tau = [i for i in json_object.values()]
+    initial_tau = tau
+    
+    print(f"initial_tau:{initial_tau}")
+        
     #This line initializes the hardware and selects the output file.
-    controls = Controls(hardware_name = com_port, filename = "./output.txt", append = True)
+    controls = Controls(filename = "./output.txt", append = True)
     
     #This sets up the figure as both visualization and control panel.
     # GridSpec is an advanced framing system that allows to place plots
@@ -183,10 +234,10 @@ def run_gui(initial_tau=[3.85e-9,2.65e-9,3.6e-9]):
         for n, plot in enumerate([A, B, B_prime, AB, AB_prime, BB_prime, ABB_prime]):
                             #Note: this ^ list reflects the exact order of data in the binary frame                                                                         
             plot.update(data[n])
-            text.text(0.05,1/7*((6-n)+0.5), "{:<4} {:.0f} {:.0f}".format(plot.title,plot.data,plot.sum),size=14)
+            text.text(0.05,1/7*((6-n)+0.5), "{:<4} {:.0f}".format(plot.title,plot.data),size=24)
         fig.canvas.flush_events()
         plt.pause(0.01) #Without this line the graphical system does not have time to draw.
-    controls.ser.close()
+    del controls
 if __name__=="__main__":
     run_gui()
     
